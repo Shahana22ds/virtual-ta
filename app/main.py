@@ -35,30 +35,70 @@ async def query(req: QueryRequest):
     if not search_result:
         raise HTTPException(status_code=404, detail="No relevant documents found.")
 
-    # 3. Build context & track sources
-    contexts = []
-    sources = []
+    # 3. Build context passages with identifiers for source tracking
+    contexts_with_ids = []
     for hit in search_result:
-        payload = hit.payload
+        payload = hit.payload or {}
         text_snippet = payload.get("text", "")
-        source_path = payload.get("source", "unknown")
-        contexts.append(text_snippet)
-        sources.append(source_path)
+        # Use actual Qdrant point ID as the passage ID to avoid mismatch
+        passage_id = hit.id if hasattr(hit, "id") else len(contexts_with_ids)
+        contexts_with_ids.append({"id": passage_id, "text": text_snippet, "source": payload.get("source", "unknown")})
 
-    # 4. Call the chat API
+    # 4. Prepare the prompt including markers for each passage to track relevant sources
+    prompt_parts = []
+    for item in contexts_with_ids:
+        # Each passage prefixed with an ID marker, e.g., [Passage point_id]
+        prompt_parts.append(f"[Passage {item['id']}]\n{item['text']}")
     prompt = (
-        "You are a helpful TA. Use the following context passages to answer the question. If there are no relevant content, let's answer 'NO_DOCUMENTS_FOUND'\n\n"
-        + "\n\n---\n\n".join(contexts)
+        "You are a helpful TA. Use the following context passages to answer the question. "
+        "If there is no relevant content, answer 'NO_DOCUMENTS_FOUND'. "
+        "Also, at the end of your answer, list the IDs of only the passages you used to answer, "
+        "in this format as a last line: 'SOURCES: [id1,id2,...]'\n\n"
+        + "\n\n---\n\n".join(prompt_parts)
         + f"\n\nQuestion: {req.question}\nAnswer:"
     )
+
     chat_resp = openai_client.chat.completions.create(
-        model="gpt-3.5-turbo",
+        model="gpt-4o",
         messages=[{"role": "system", "content": prompt}],
         temperature=0.0,
     )
-    answer = chat_resp.choices[0].message.content.strip()
-    
-    if answer == "NO_DOCUMENTS_FOUND":
+    answer_full = chat_resp.choices[0].message.content
+    if answer_full is None:
+        raise HTTPException(status_code=500, detail="No answer returned from language model.")
+    answer_full = answer_full.strip()
+
+    if answer_full == "NO_DOCUMENTS_FOUND":
         raise HTTPException(status_code=404, detail="No relevant documents found.")
+
+    # 5. Extract the SOURCES IDs from the model's answer
+    import re
+
+    source_match = re.search(r"SOURCES:\s*\[(.*?)\]", answer_full)
+    if source_match:
+        source_ids_str = source_match.group(1).strip()
+        if source_ids_str:
+            # Parse source IDs by their original IDs, which may not be sequential
+            source_ids = []
+            for s in source_ids_str.split(","):
+                s_clean = s.strip()
+                if s_clean.isdigit():
+                    source_ids.append(int(s_clean))
+                else:
+                    # If IDs are non-integer strings, keep as string
+                    source_ids.append(s_clean)
+        else:
+            source_ids = []
+        # Remove the SOURCES part from the answer
+        answer = re.sub(r"\n*SOURCES:\s*\[.*?\]", "", answer_full).strip()
+    else:
+        # If no sources provided by model, assume all
+        source_ids = [item["id"] for item in contexts_with_ids]
+        answer = answer_full
+
+    # 6. Collect only the sources that were referenced
+    # Match source_ids with contexts_with_ids by their actual 'id' field
+    id_to_source = {item["id"]: item["source"] for item in contexts_with_ids}
+    sources = [id_to_source[sid] for sid in source_ids if sid in id_to_source]
 
     return QueryResponse(answer=answer, sources=sources)
