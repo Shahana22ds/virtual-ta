@@ -18,7 +18,10 @@ def scrape_month(year_month: str = "2025-01"):
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+        context = browser.new_context()
+        # Grant clipboard read and write permissions
+        context.grant_permissions(["clipboard-read", "clipboard-write"])
+        page = context.new_page()
         page.goto(start_url)
         # Wait for sidebar-nav container
         page.wait_for_selector("aside.sidebar > div.sidebar-nav")
@@ -39,11 +42,12 @@ def scrape_month(year_month: str = "2025-01"):
 
             # Navigate and scrape
             page.goto(page_url)
+            page.wait_for_load_state("networkidle")
             page.wait_for_selector("article.markdown-section#main")
             main = page.query_selector("article.markdown-section#main")
-            content = main.text_content().strip()
-
-            with open(filename, "w", encoding="utf-8") as f:
+            content = main.text_content().strip().replace("Copy to clipboardErrorCopied", "\n")
+            # Write content explicitly with UTF-8 encoding to avoid encoding issues
+            with open(filename, "w", encoding="utf-8", errors="replace") as f:
                 f.write(content)
             total += 1
 

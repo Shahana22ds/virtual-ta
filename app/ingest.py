@@ -3,7 +3,7 @@ import logging
 from openai import OpenAI
 from qdrant_client.models import PointStruct
 from .config import settings
-from .qdrant import client
+from .qdrant import client, init_qdrant_collection
 import pathlib
 
 # Setup logging
@@ -27,6 +27,9 @@ def chunk_text(text: str, size: int = 1000, overlap: int = 200) -> list[str]:
     return chunks
 
 def ingest():
+    # Recreate Qdrant collection
+    init_qdrant_collection()
+    
     # 1. Find all .txt files (adapt to .md, .html, etc.)
     files = glob.glob("data/raw/**/*.txt", recursive=True)
     logging.info(f"Found {len(files)} files to ingest.")
@@ -39,6 +42,8 @@ def ingest():
 
         chunks = chunk_text(text)
         logging.info(f"Split into {len(chunks)} chunks.")
+
+        batch_points = []
 
         # 2. Chunk
         for i, chunk in enumerate(chunks, start=1):
@@ -58,25 +63,30 @@ def ingest():
             slug = '.'.join(pathlib.Path(path).name.replace("_", "/").split('.')[:-1])
             url = f"{base_url}{slug}"
 
-            # 4. Prepare and upsert
-            point = PointStruct(
-                id=point_id,
-                vector=embedding,
-                payload={
-                    "source": url,
-                    "text": chunk
-                }
+            # 4. Prepare points to batch and upsert
+            batch_points.append(
+                PointStruct(
+                    id=point_id,
+                    vector=embedding,
+                    payload={
+                        "source": url,
+                        "text": chunk
+                    }
+                )
             )
-            try:
-                client.upsert(
-                    collection_name="virtual_ta",
-                    points=[point]                # batch of one; you can batch multiple
-                )                               #  [oai_citation:1‡gist.github.com](https://gist.github.com/RGGH/cdbc24a873b4673bd137bdc1fb9bdd44?utm_source=chatgpt.com)
-            except Exception as e:
-                logging.error(f"Failed to upsert point {point_id} for file {path}: {e}")
-                continue
 
             point_id += 1
+
+            # Upsert in batches of 100 or at the last chunk
+            if len(batch_points) == 100 or (i == len(chunks) and batch_points):
+                try:
+                    client.upsert(
+                        collection_name="virtual_ta",
+                        points=batch_points
+                    )
+                except Exception as e:
+                    logging.error(f"Failed to upsert points batch ending at point {point_id-1} for file {path}: {e}")
+                batch_points = []
 
     logging.info(f"✅ Ingested {point_id} chunks into Qdrant.")
 

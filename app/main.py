@@ -11,9 +11,13 @@ openai_client = OpenAI(api_key=settings.openai_api_key)
 class QueryRequest(BaseModel):
     question: str
 
+class AnswerSourceLink(BaseModel):
+    url: str
+    text: str
+
 class QueryResponse(BaseModel):
     answer: str
-    sources: list[str]
+    links: list[AnswerSourceLink]
 
 # ---- Endpoint ----
 @app.post("/query", response_model=QueryResponse)
@@ -52,11 +56,13 @@ async def query(req: QueryRequest):
     prompt = (
         "You are a helpful TA. Use the following context passages to answer the question. "
         "If there is no relevant content, answer 'NO_DOCUMENTS_FOUND'. "
-        "Also, at the end of your answer, list the IDs of only the passages you used to answer, "
-        "in this format as a last line: 'SOURCES: [id1,id2,...]'\n\n"
+        "At the end of your answer, list only the IDs of the passages you actually used to answer, "
+        "and list no others, in this format as the last line: 'SOURCES: [id1,id2,...]'\n\n"
         + "\n\n---\n\n".join(prompt_parts)
         + f"\n\nQuestion: {req.question}\nAnswer:"
     )
+    
+    print(prompt)
 
     chat_resp = openai_client.chat.completions.create(
         model="gpt-4o",
@@ -68,7 +74,7 @@ async def query(req: QueryRequest):
         raise HTTPException(status_code=500, detail="No answer returned from language model.")
     answer_full = answer_full.strip()
 
-    if answer_full == "NO_DOCUMENTS_FOUND":
+    if answer_full.startswith("NO_DOCUMENTS_FOUND"):
         raise HTTPException(status_code=404, detail="No relevant documents found.")
 
     # 5. Extract the SOURCES IDs from the model's answer
@@ -98,7 +104,7 @@ async def query(req: QueryRequest):
 
     # 6. Collect only the sources that were referenced
     # Match source_ids with contexts_with_ids by their actual 'id' field
-    id_to_source = {item["id"]: item["source"] for item in contexts_with_ids}
-    sources = [id_to_source[sid] for sid in source_ids if sid in id_to_source]
+    id_to_source = {item["id"]: AnswerSourceLink(url=item["source"], text=item["text"]) for item in contexts_with_ids}
+    links = [id_to_source[sid] for sid in source_ids if sid in id_to_source]
 
-    return QueryResponse(answer=answer, sources=sources)
+    return QueryResponse(answer=answer, links=links)
