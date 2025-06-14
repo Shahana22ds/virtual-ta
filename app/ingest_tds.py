@@ -14,7 +14,7 @@ openai_client = OpenAI(api_key=settings.openai_api_key)
 
 base_url = "https://tds.s-anand.net/#/"
 
-def chunk_text(text: str, size: int = 1000, overlap: int = 200) -> list[str]:
+def chunk_text(text: str, size: int = 500, overlap: int = 300) -> list[str]:
     """
     Chunk text into chunks of approximately 'size' characters,
     but only at sentence boundaries, with overlap between chunks.
@@ -64,8 +64,10 @@ def ingest():
             # 3. Embed
             try:
                 resp = openai_client.embeddings.create(
-                    model="text-embedding-ada-002",
-                    input=[chunk]
+                    model="text-embedding-3-small",
+                    input=[chunk],
+                    dimensions=1536,
+                    encoding_format="float"
                 )
                 embedding = resp.data[0].embedding  # extract vector  [oai_citation:0‡stackoverflow.com](https://stackoverflow.com/questions/77943395/openai-embeddings-api-how-to-extract-the-embedding-vector?utm_source=chatgpt.com)
             except Exception as e:

@@ -70,18 +70,20 @@ async def query(req: QueryRequest):
     input_text = req.question if image_resp_text is None else f"{image_resp_text} {req.question}"
     logging.info("Generating embedding for the question")
     emb_resp = openai_client.embeddings.create(
-        model="text-embedding-ada-002",
-        input=[input_text]
+        model="text-embedding-3-small",
+        input=[input_text],
+        dimensions=1536,
+        encoding_format="float"
     )
     q_vector = emb_resp.data[0].embedding
     logging.debug(f"Embedding vector generated of length {len(q_vector)}")
 
     # 2. Retrieve top-5 similar chunks from Qdrant
-    logging.info("Querying Qdrant for top-5 similar chunks")
+    logging.info("Querying Qdrant for top-20 similar chunks")
     search_result = client.search(
         collection_name="virtual_ta",
         query_vector=q_vector,
-        limit=5
+        limit=20
     )
 
     if not search_result:
@@ -95,8 +97,10 @@ async def query(req: QueryRequest):
         text_snippet = payload.get("text", "")
         # Use actual Qdrant point ID as the passage ID to avoid mismatch
         passage_id = hit.id if hasattr(hit, "id") else len(contexts_with_ids)
-        contexts_with_ids.append({"id": passage_id, "text": text_snippet, "source": payload.get("source", "unknown")})
-    logging.debug(f"Collected {len(contexts_with_ids)} context passages from search results")
+        source = payload.get("source", "unknown")
+        contexts_with_ids.append({"id": passage_id, "text": text_snippet, "source": source})
+        # logging.info(f"Passage: {text_snippet}\nSource: {source}")
+    logging.info(f"Collected {len(contexts_with_ids)} context passages from search results")
 
     # 4. Prepare the prompt including markers for each passage to track relevant sources
     prompt_messages = []
@@ -105,10 +109,13 @@ async def query(req: QueryRequest):
         # Each passage prefixed with an ID marker, e.g., [Passage point_id]
         prompt_parts.append(f"[Passage {item['id']}]\n{item['text']}")
     system_prompt = (
-        "You are a helpful TA. Use the following context passages to answer the question. "
-        "If there is no relevant content, answer 'NO_DOCUMENTS_FOUND'. "
-        "At the end of your answer, list only the IDs of the passages you actually used to answer, "
-        "and list no others, in this format as the last line: 'SOURCES: [id1,id2,...]'\n\n"
+        "You are the Teaching Assistant for the “Tools in Data Science” course and an expert in large language models, Retrieval-Augmented Generation, Python, OpenAI, and related topics. "
+        "Use the following context passages to answer the student’s question—whenever possible, draw your definitive facts directly from the course content. "
+        "At the same time, leverage your domain knowledge to connect and contextualize information across multiple passages, highlighting relationships or clarifications when helpful. "
+        "If the answer cannot be found in these passages, reply exactly “NO_DOCUMENTS_FOUND.” "
+        "Provide clear, precise, and well-structured answers. "
+        "At the end of your response, list only the IDs of the passages you used, in this format:\n"
+        "SOURCES: [id1,id2,...]\n\n"
         + "\n\n---\n\n".join(prompt_parts)
     )
     prompt_messages.append({"role": "system", "content": system_prompt})
