@@ -16,14 +16,26 @@ base_url = "https://tds.s-anand.net/#/"
 
 def chunk_text(text: str, size: int = 1000, overlap: int = 200) -> list[str]:
     """
-    Naïve character-based chunker with overlap.
+    Chunk text into chunks of approximately 'size' characters,
+    but only at sentence boundaries, with overlap between chunks.
     """
+    import re
+
+    sentences = re.findall(r'[^.!?]*[.!?]', text, re.DOTALL)
     chunks = []
-    start = 0
-    while start < len(text):
-        end = start + size
-        chunks.append(text[start:end])
-        start += size - overlap
+    current_chunk = ""
+    for sentence in sentences:
+        if len(current_chunk) + len(sentence) <= size or not current_chunk:
+            current_chunk += sentence
+        else:
+            chunks.append(current_chunk.strip())
+            # Overlap: include last part of current_chunk in new chunk
+            overlap_text = current_chunk[-overlap:] if overlap < len(current_chunk) else current_chunk
+            current_chunk = overlap_text + sentence
+
+    if current_chunk:
+        chunks.append(current_chunk.strip())
+
     return chunks
 
 def ingest():

@@ -85,6 +85,19 @@ async def query(req: QueryRequest):
 
     # 4. Prepare the prompt including markers for each passage to track relevant sources
     prompt_messages = []
+    prompt_parts = []
+    for item in contexts_with_ids:
+        # Each passage prefixed with an ID marker, e.g., [Passage point_id]
+        prompt_parts.append(f"[Passage {item['id']}]\n{item['text']}")
+    system_prompt = (
+        "You are a helpful TA. Use the following context passages to answer the question. "
+        "If there is no relevant content, answer 'NO_DOCUMENTS_FOUND'. "
+        "At the end of your answer, list only the IDs of the passages you actually used to answer, "
+        "and list no others, in this format as the last line: 'SOURCES: [id1,id2,...]'\n\n"
+        + "\n\n---\n\n".join(prompt_parts)
+    )
+    prompt_messages.append({"role": "system", "content": system_prompt})
+    
     if req.image is not None:
         prompt_messages.extend([
         {
@@ -100,20 +113,8 @@ async def query(req: QueryRequest):
             "role": "user",
             "content": "Disregard any non english text in the image"
         }])
-    
-    prompt_parts = []
-    for item in contexts_with_ids:
-        # Each passage prefixed with an ID marker, e.g., [Passage point_id]
-        prompt_parts.append(f"[Passage {item['id']}]\n{item['text']}")
-    prompt = (
-        "You are a helpful TA. Use the following context passages to answer the question. "
-        "If there is no relevant content, answer 'NO_DOCUMENTS_FOUND'. "
-        "At the end of your answer, list only the IDs of the passages you actually used to answer, "
-        "and list no others, in this format as the last line: 'SOURCES: [id1,id2,...]'\n\n"
-        + "\n\n---\n\n".join(prompt_parts)
-        + f"\n\nQuestion: {req.question}\nAnswer:"
-    )
-    prompt_messages.append({"role": "system", "content": prompt})
+
+    prompt_messages.append({"role": "user", "content": f"\n\nQuestion: {req.question}\nAnswer:"})
     
     chat_resp = openai_client.chat.completions.create(
         model="gpt-4o-mini",
