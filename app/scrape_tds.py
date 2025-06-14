@@ -6,55 +6,75 @@ RAW_DIR = "data/raw/tds"
 BASE_URL = "https://tds.s-anand.net"
 
 
-def scrape_month(year_month: str = "2025-01"):
+def scrape_url(start_url):
     """
-    Use Playwright to navigate the Docsify site for the given month,
-    extract all sidebar links under aside.sidebar > div.sidebar-nav,
-    and scrape each page's main content into individual text files.
+    Use Playwright to recursively navigate the Docsify site starting from start_url,
+    extracting all visible sidebar links under aside.sidebar > div.sidebar-nav,
+    scraping each page's main content into individual text files, and avoid revisiting URLs.
     """
     os.makedirs(RAW_DIR, exist_ok=True)
-    # Initial landing URL with hash
-    start_url = f"{BASE_URL}/#/{year_month}/"
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context()
-        # Grant clipboard read and write permissions
-        context.grant_permissions(["clipboard-read", "clipboard-write"])
-        page = context.new_page()
-        page.goto(start_url)
+    visited = set()
+    total = 0
+
+    def visit(page, url):
+        nonlocal total
+        if url in visited:
+            return
+        visited.add(url)
+
+        page.goto(url)
+        page.wait_for_load_state("networkidle")
+        page.wait_for_selector("article.markdown-section#main")
+        main = page.query_selector("article.markdown-section#main")
+        content = main.text_content().strip().replace("Copy to clipboardErrorCopied", "\n")
+
+        # Create a safe filename slug based on the URL's hash path
+        # Extract hash path if exists, fallback to entire URL
+        hash_path = ""
+        if "#" in url:
+            hash_part = url.split("#", 1)[1]
+            hash_path = hash_part.lstrip("/").replace("/", "_")
+        else:
+            # fallback if no hash present
+            hash_path = url.replace("://", "_").replace("/", "_")
+
+        # Use the hash path or fallback for filename, prefix with a number to keep uniqueness
+        filename = os.path.join(RAW_DIR, f"{hash_path}.txt")
+        with open(filename, "w", encoding="utf-8", errors="replace") as f:
+            f.write(content)
+        total += 1
+
         # Wait for sidebar-nav container
         page.wait_for_selector("aside.sidebar > div.sidebar-nav")
 
-        # Collect all links in the sidebar
+        # Collect all visible links in the sidebar
         links = page.query_selector_all("aside.sidebar > div.sidebar-nav a")
-        total = 0
-
         for link in links:
+            # Check if link is visible
+            # if not link.is_visible():
+            #     continue
             href = link.get_attribute("href")  # e.g. "#/README" or "#/../vscode"
             if not href or not href.startswith("#/"):
                 continue
             # Construct full URL preserving hash routing
-            page_url = f"{BASE_URL}/{href}"
-            # Create a safe filename slug based on the hash path
-            slug = href.lstrip("#/").replace("/", "_")
-            filename = os.path.join(RAW_DIR, f"{year_month}_{slug}.txt")
+            next_url = f"{BASE_URL}/{href}"
+            if next_url in visited:
+                continue
+            visit(page, next_url)
 
-            # Navigate and scrape
-            page.goto(page_url)
-            page.wait_for_load_state("networkidle")
-            page.wait_for_selector("article.markdown-section#main")
-            main = page.query_selector("article.markdown-section#main")
-            content = main.text_content().strip().replace("Copy to clipboardErrorCopied", "\n")
-            # Write content explicitly with UTF-8 encoding to avoid encoding issues
-            with open(filename, "w", encoding="utf-8", errors="replace") as f:
-                f.write(content)
-            total += 1
-
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)
+        context = browser.new_context()
+        # Grant clipboard read and write permissions
+        context.grant_permissions(["clipboard-read", "clipboard-write"])
+        page = context.new_page()
+        visit(page, start_url)
         browser.close()
-    print(f"✅ Scraped {total} pages for {year_month} into {RAW_DIR}")
+
+    print(f"✅ Scraped {total} pages into {RAW_DIR}")
 
 
 if __name__ == "__main__":
-    # Scrape only January 2025
-    scrape_month("2025-01")
+    # Entrypoint expects a full URL
+    scrape_url("https://tds.s-anand.net/#/2025-01/")
