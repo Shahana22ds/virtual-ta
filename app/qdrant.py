@@ -1,6 +1,7 @@
 from qdrant_client import QdrantClient
 from qdrant_client.models import VectorParams, Distance
 from .config import settings
+import logging
 
 # Initialize client
 client = QdrantClient(
@@ -17,5 +18,5 @@ def init_qdrant_collection():
                     distance=Distance.COSINE,
                 ),
     )
-    print("✅ Qdrant collection 'virtual_ta' is ready.")
+    logging.info("✅ Qdrant collection 'virtual_ta' is ready.")
     

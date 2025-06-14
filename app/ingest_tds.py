@@ -43,7 +43,7 @@ def ingest():
     init_qdrant_collection()
     
     # 1. Find all .txt files (adapt to .md, .html, etc.)
-    files = glob.glob("data/raw/**/*.txt", recursive=True)
+    files = glob.glob("data/raw/tds/**/*.txt", recursive=True)
     logging.info(f"Found {len(files)} files to ingest.")
 
     point_id = 0
