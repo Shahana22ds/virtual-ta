@@ -3,6 +3,8 @@ from pydantic import BaseModel
 from openai import OpenAI
 from app.config import settings
 from app.qdrant import client
+import re
+from typing import Optional
 
 app = FastAPI()
 openai_client = OpenAI(api_key=settings.openai_api_key)
@@ -10,6 +12,7 @@ openai_client = OpenAI(api_key=settings.openai_api_key)
 # ---- Models ----
 class QueryRequest(BaseModel):
     question: str
+    image: Optional[str]
 
 class AnswerSourceLink(BaseModel):
     url: str
@@ -37,7 +40,7 @@ async def query(req: QueryRequest):
     )
 
     if not search_result:
-        raise HTTPException(status_code=404, detail="No relevant documents found.")
+        return QueryResponse(answer="No relevant articles found.", links=[])
 
     # 3. Build context passages with identifiers for source tracking
     contexts_with_ids = []
@@ -61,11 +64,11 @@ async def query(req: QueryRequest):
         + "\n\n---\n\n".join(prompt_parts)
         + f"\n\nQuestion: {req.question}\nAnswer:"
     )
-    
+
     print(prompt)
 
     chat_resp = openai_client.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-4o-mini",
         messages=[{"role": "system", "content": prompt}],
         temperature=0.0,
     )
@@ -75,11 +78,9 @@ async def query(req: QueryRequest):
     answer_full = answer_full.strip()
 
     if answer_full.startswith("NO_DOCUMENTS_FOUND"):
-        raise HTTPException(status_code=404, detail="No relevant documents found.")
+        return QueryResponse(answer="No relevant articles found.", links=[])
 
     # 5. Extract the SOURCES IDs from the model's answer
-    import re
-
     source_match = re.search(r"SOURCES:\s*\[(.*?)\]", answer_full)
     if source_match:
         source_ids_str = source_match.group(1).strip()
