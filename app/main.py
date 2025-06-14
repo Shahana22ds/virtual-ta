@@ -5,6 +5,10 @@ from app.config import settings
 from app.qdrant import client
 import re
 from typing import Optional
+import base64
+import binascii
+from app.utils import get_image_mime_type
+
 
 app = FastAPI()
 openai_client = OpenAI(api_key=settings.openai_api_key)
@@ -12,7 +16,7 @@ openai_client = OpenAI(api_key=settings.openai_api_key)
 # ---- Models ----
 class QueryRequest(BaseModel):
     question: str
-    image: Optional[str]
+    image: Optional[str] = None
 
 class AnswerSourceLink(BaseModel):
     url: str
@@ -25,10 +29,38 @@ class QueryResponse(BaseModel):
 # ---- Endpoint ----
 @app.post("/query", response_model=QueryResponse)
 async def query(req: QueryRequest):
+    # If image in query analyze the image and decode text
+    image_resp_text = None
+    image_mime_type = None
+    if req.image is not None:
+        image_mime_type = get_image_mime_type(req.image)
+        try:
+            base64.b64decode(req.image)
+        except (binascii.Error, ValueError) as e:
+            raise HTTPException(status_code=400, detail=f"Invalid base64 encoded image.\n{e}")
+        prompt_messages = [
+            {
+                "role": "user",
+                "content": [{
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{image_mime_type};base64,{req.image}"
+                    }
+                }]
+            },
+            { "role": "user", "content": "what's in this image? disregard any non english text" }
+        ]
+        chat_resp = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=prompt_messages,
+            temperature=0.0,
+        )
+        image_resp_text = chat_resp.choices[0].message.content
+    
     # 1. Embed the question
     emb_resp = openai_client.embeddings.create(
         model="text-embedding-ada-002",
-        input=[req.question]
+        input=[req.question if image_resp_text is None else f"{image_resp_text} {req.question}"]
     )
     q_vector = emb_resp.data[0].embedding
 
@@ -52,6 +84,23 @@ async def query(req: QueryRequest):
         contexts_with_ids.append({"id": passage_id, "text": text_snippet, "source": payload.get("source", "unknown")})
 
     # 4. Prepare the prompt including markers for each passage to track relevant sources
+    prompt_messages = []
+    if req.image is not None:
+        prompt_messages.extend([
+        {
+            "role": "user",
+            "content": [{
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:{image_mime_type};base64,{req.image}"
+                }
+            }]
+        },
+        {
+            "role": "user",
+            "content": "Disregard any non english text in the image"
+        }])
+    
     prompt_parts = []
     for item in contexts_with_ids:
         # Each passage prefixed with an ID marker, e.g., [Passage point_id]
@@ -64,12 +113,11 @@ async def query(req: QueryRequest):
         + "\n\n---\n\n".join(prompt_parts)
         + f"\n\nQuestion: {req.question}\nAnswer:"
     )
-
-    print(prompt)
-
+    prompt_messages.append({"role": "system", "content": prompt})
+    
     chat_resp = openai_client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[{"role": "system", "content": prompt}],
+        messages=prompt_messages,
         temperature=0.0,
     )
     answer_full = chat_resp.choices[0].message.content
