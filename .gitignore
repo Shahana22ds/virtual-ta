@@ -2,3 +2,5 @@
 **/__pycache__/
 .env
 data/
+notes.txt
+questions.txt
