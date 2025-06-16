@@ -3,7 +3,7 @@
 ## Setup 
 
 ```
-uv sync
+uv sync --extra dev
 ```
 
 ## To run locally
@@ -47,6 +47,10 @@ curl -sS -X POST http://localhost:8000/query \
 ```
 
 ---
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](./LICENSE) file for details.
+
 
 Environment variables that need to be setup in the .env file
 

@@ -3,15 +3,23 @@ name = "virtual-ta"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
+licence = { file = "LICENSE" }
+author = [
+    {name = "Shahana P A", email = "22ds1000045@ds.study.iitm.ac.in"}
+]
 requires-python = ">=3.12"
+
 dependencies = [
-    "beautifulsoup4>=4.13.4",
     "fastapi[standard]>=0.115.12",
     "openai>=1.86.0",
-    "playwright>=1.52.0",
     "pydantic>=2.11.6",
     "pydantic-settings>=2.9.1",
-    "python-dotenv>=1.1.0",
     "qdrant-client>=1.14.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "beautifulsoup4>=4.13.4",
+    "playwright>=1.52.0",
     "requests>=2.32.4",
 ]
