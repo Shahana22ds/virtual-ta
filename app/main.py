@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from openai import OpenAI
 from app.config import settings
@@ -12,6 +13,13 @@ from app.utils import get_image_mime_type
 
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=True,
+)
 openai_client = OpenAI(api_key=settings.openai_api_key)
 
 # Setup logging
@@ -30,7 +38,11 @@ class QueryResponse(BaseModel):
     answer: str
     links: list[AnswerSourceLink]
 
-# ---- Endpoint ----
+# ---- Endpoints ----
+@app.get("/")
+async def root():
+    return {"message": "Welcome to the Virtual TA API! Use /query to ask questions."}
+
 @app.post("/query", response_model=QueryResponse)
 async def query(req: QueryRequest):
     logging.info("Received query request")
